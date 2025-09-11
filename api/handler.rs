@@ -12,8 +12,8 @@ pub async fn handler(_req: Request) -> Result<Response<Body>, Error> {
         .header("Content-Type", "application/json")
         .body(
             json!({
-              "message": "こんちは〜",
-            })
+            "message": "こんちは〜",
+              })
             .to_string()
             .into(),
         )?)
