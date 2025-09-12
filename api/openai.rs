@@ -30,11 +30,9 @@ pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
 
     // Header.x-api-key チェック
     let expected_api_key = std::env::var("X_API_KEY").ok();
-    println!("expected_api_key: {:?}", expected_api_key);
     if let Some(expected) = expected_api_key.as_ref() {
         // 環境変数が設定されている場合のみ検証 (未設定ならスキップ)
         let provided = req.headers().get("x-api-key").and_then(|h| h.to_str().ok());
-        println!("Provided API Key: {:?}", provided);
         match provided {
             Some(got) if got == expected => { /* OK */ }
             _ => {
