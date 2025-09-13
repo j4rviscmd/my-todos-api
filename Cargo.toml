@@ -12,6 +12,7 @@ anyhow = "1.0.99"
 serde = { version = "1", features = ["derive"] }
 url = "2"
 openai = "1"
+http = "0.2"
 
 # You can specify a library for shared logic here (optional)
 # [lib]
