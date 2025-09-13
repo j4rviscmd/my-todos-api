@@ -1,3 +1,5 @@
+use openai::chat::{ChatCompletion, ChatCompletionMessage, ChatCompletionMessageRole};
+use openai::Credentials;
 use serde::Deserialize;
 use serde_json::json;
 use vercel_runtime::{run, Body, Error, Request, Response, StatusCode};
@@ -88,19 +90,91 @@ pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
             )?);
     }
 
-    // ここで OpenAI API 呼び出しを行う想定 (未実装: TODO:)
+    // OpenAI (GitHub Models) 呼び出し
+    // crate は OPENAI_KEY / OPENAI_BASE_URL を参照するので名称に注意。
+    let api_key = std::env::var("OPENAI_KEY")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    let api_key = match api_key {
+        Some(v) => v,
+        None => {
+            return Ok(Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header("Content-Type", "application/json")
+                .body(
+                    json!({"error": "Missing OPENAI_KEY (or OPENAI_API_KEY)"})
+                        .to_string()
+                        .into(),
+                )?);
+        }
+    };
 
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "application/json")
-        .body(
-            json!({
-                "prompts": {
-                    "system": parsed.prompts.system,
-                    "user": parsed.prompts.user
-                }
-            })
-            .to_string()
-            .into(),
-        )?)
+    let base_url = std::env::var("OPENAI_BASE_URL").unwrap();
+
+    // Credentials を直接生成 (from_env は unwrap で panic するため使わない)
+    let creds = Credentials::new(api_key, base_url);
+
+    let system_content = parsed.prompts.system.clone();
+    let user_content = parsed.prompts.user.clone();
+
+    let messages = vec![
+        ChatCompletionMessage {
+            role: ChatCompletionMessageRole::System,
+            content: Some(system_content),
+            name: None,
+            function_call: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        ChatCompletionMessage {
+            role: ChatCompletionMessageRole::User,
+            content: Some(user_content),
+            name: None,
+            function_call: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+    let model = std::env::var("OPENAI_MODEL").unwrap();
+
+    let completion_res = ChatCompletion::builder(&model, messages)
+        .temperature(0.0)
+        .credentials(creds)
+        .create()
+        .await;
+
+    match completion_res {
+        Ok(resp) => {
+            // 最初のアシスタントメッセージを取り出す
+            let assistant = resp
+                .choices
+                .first()
+                .and_then(|c| c.message.content.as_ref())
+                .map(|c| c.to_string())
+                .unwrap_or_default();
+
+            Ok(Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .body(
+                    json!({
+                        "model": model,
+                        "answer": assistant,
+                    })
+                    .to_string()
+                    .into(),
+                )?)
+        }
+        Err(e) => Ok(Response::builder()
+            .status(StatusCode::BAD_GATEWAY)
+            .header("Content-Type", "application/json")
+            .body(
+                json!({
+                    "error": "Upstream OpenAI error",
+                    "detail": e.to_string()
+                })
+                .to_string()
+                .into(),
+            )?),
+    }
 }
