@@ -4,6 +4,21 @@ use serde::Deserialize;
 use serde_json::json;
 use vercel_runtime::{run, Body, Error, Request, Response, StatusCode};
 
+fn corsify(mut resp: Response<Body>) -> Response<Body> {
+    let headers = resp.headers_mut();
+    headers.insert("Access-Control-Allow-Origin", "*".parse().unwrap());
+    headers.insert(
+        "Access-Control-Allow-Methods",
+        "POST,OPTIONS".parse().unwrap(),
+    );
+    headers.insert(
+        "Access-Control-Allow-Headers",
+        "Content-Type,x-api-key".parse().unwrap(),
+    );
+    headers.insert("Access-Control-Max-Age", "86400".parse().unwrap());
+    resp
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     run(handler).await
@@ -21,13 +36,22 @@ struct PromptsRequest {
 }
 
 pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
+    // Preflight (OPTIONS)
+    if req.method().as_str() == "OPTIONS" {
+        let resp = Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .body(Body::Empty)?;
+        return Ok(corsify(resp));
+    }
+
     // Method check (POSTのみ)
     if req.method().as_str() != "POST" {
-        return Ok(Response::builder()
+        let resp = Response::builder()
             .status(StatusCode::METHOD_NOT_ALLOWED)
-            .header("Allow", "POST")
+            .header("Allow", "POST,OPTIONS")
             .header("Content-Type", "application/json")
-    .body(json!({"error": "Use POST with JSON body { 'prompts': { 'system': '...', 'user': '...' } }"}).to_string().into())?);
+            .body(json!({"error": "Use POST with JSON body { 'prompts': { 'system': '...', 'user': '...' } }"}).to_string().into())?;
+        return Ok(corsify(resp));
     }
 
     // Header.x-api-key チェック
@@ -38,33 +62,36 @@ pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
         match provided {
             Some(got) if got == expected => { /* OK */ }
             _ => {
-                return Ok(Response::builder()
+                let resp = Response::builder()
                     .status(StatusCode::UNAUTHORIZED)
                     .header("Content-Type", "application/json")
-                    .body(json!({"error": "Unauthorized"}).to_string().into())?);
+                    .body(json!({"error": "Unauthorized"}).to_string().into())?;
+                return Ok(corsify(resp));
             }
         }
     }
 
     let body_bytes = req.body();
     if body_bytes.is_empty() {
-        return Ok(Response::builder()
+        let resp = Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header("Content-Type", "application/json")
-            .body(json!({"error": "Empty body"}).to_string().into())?);
+            .body(json!({"error": "Empty body"}).to_string().into())?;
+        return Ok(corsify(resp));
     }
 
     let parsed: PromptsRequest = match serde_json::from_slice(body_bytes) {
         Ok(v) => v,
         Err(e) => {
-            return Ok(Response::builder()
+            let resp = Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header("Content-Type", "application/json")
                 .body(
                     json!({"error": "Invalid JSON", "detail": e.to_string()})
                         .to_string()
                         .into(),
-                )?);
+                )?;
+            return Ok(corsify(resp));
         }
     };
 
@@ -77,17 +104,15 @@ pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
         issues.push("prompts.user is empty".to_string());
     }
     if !issues.is_empty() {
-        return Ok(Response::builder()
+        let resp = Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header("Content-Type", "application/json")
             .body(
-                json!({
-                    "error": "Validation failed",
-                    "issues": issues
-                })
-                .to_string()
-                .into(),
-            )?);
+                json!({ "error": "Validation failed", "issues": issues })
+                    .to_string()
+                    .into(),
+            )?;
+        return Ok(corsify(resp));
     }
 
     // OpenAI (GitHub Models) 呼び出し
@@ -98,14 +123,15 @@ pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
     let api_key = match api_key {
         Some(v) => v,
         None => {
-            return Ok(Response::builder()
+            let resp = Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .header("Content-Type", "application/json")
                 .body(
                     json!({"error": "Missing OPENAI_KEY (or OPENAI_API_KEY)"})
                         .to_string()
                         .into(),
-                )?);
+                )?;
+            return Ok(corsify(resp));
         }
     };
 
@@ -153,27 +179,22 @@ pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
                 .map(|c| c.to_string())
                 .unwrap_or_default();
 
-            Ok(Response::builder()
+            let resp = Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", "application/json")
-                .body(
-                    json!({
-                        "answer": assistant,
-                    })
-                    .to_string()
-                    .into(),
-                )?)
+                .body(json!({ "answer": assistant }).to_string().into())?;
+            Ok(corsify(resp))
         }
-        Err(e) => Ok(Response::builder()
-            .status(StatusCode::BAD_GATEWAY)
-            .header("Content-Type", "application/json")
-            .body(
-                json!({
-                    "error": "Upstream OpenAI error",
-                    "detail": e.to_string()
-                })
-                .to_string()
-                .into(),
-            )?),
+        Err(e) => {
+            let resp = Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .header("Content-Type", "application/json")
+                .body(
+                    json!({"error": "Upstream OpenAI error", "detail": e.to_string()})
+                        .to_string()
+                        .into(),
+                )?;
+            Ok(corsify(resp))
+        }
     }
 }
