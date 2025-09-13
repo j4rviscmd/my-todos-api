@@ -9,13 +9,13 @@ async fn main() -> Result<(), Error> {
 
 #[derive(Deserialize, Debug)]
 struct PromptItem {
-    id: u32,        // 1から始まる連番想定
-    prompt: String, // プロンプト本文
+    system: String, // システム指示
+    user: String,   // ユーザー入力
 }
 
 #[derive(Deserialize, Debug)]
 struct PromptsRequest {
-    prompts: Vec<PromptItem>,
+    prompts: PromptItem, // 配列不要: 単一オブジェクト
 }
 
 pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
@@ -25,7 +25,7 @@ pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
             .status(StatusCode::METHOD_NOT_ALLOWED)
             .header("Allow", "POST")
             .header("Content-Type", "application/json")
-            .body(json!({"error": "Use POST with JSON body { 'prompts': [ { 'id': 1, 'prompt': '...'}, ... ] }"}).to_string().into())?);
+    .body(json!({"error": "Use POST with JSON body { 'prompts': { 'system': '...', 'user': '...' } }"}).to_string().into())?);
     }
 
     // Header.x-api-key チェック
@@ -66,36 +66,22 @@ pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
         }
     };
 
-    if parsed.prompts.is_empty() {
-        return Ok(Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .header("Content-Type", "application/json")
-            .body(
-                json!({"error": "'prompts' must not be empty"})
-                    .to_string()
-                    .into(),
-            )?);
+    // Validate single prompt item
+    let mut issues: Vec<String> = Vec::new();
+    if parsed.prompts.system.trim().is_empty() {
+        issues.push("prompts.system is empty".to_string());
     }
-
-    // Validate sequential IDs starting from 1
-    let mut invalid: Vec<String> = Vec::new();
-    for (i, item) in parsed.prompts.iter().enumerate() {
-        let expected = (i as u32) + 1;
-        if item.id != expected {
-            invalid.push(format!("expected id {} but got {}", expected, item.id));
-        }
-        if item.prompt.trim().is_empty() {
-            invalid.push(format!("id {} has empty prompt", item.id));
-        }
+    if parsed.prompts.user.trim().is_empty() {
+        issues.push("prompts.user is empty".to_string());
     }
-    if !invalid.is_empty() {
+    if !issues.is_empty() {
         return Ok(Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header("Content-Type", "application/json")
             .body(
                 json!({
                     "error": "Validation failed",
-                    "issues": invalid
+                    "issues": issues
                 })
                 .to_string()
                 .into(),
@@ -107,8 +93,14 @@ pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
-        .body(json!({
-            "count": parsed.prompts.len(),
-            "prompts": parsed.prompts.iter().map(|p| json!({"id": p.id, "prompt": p.prompt})).collect::<Vec<_>>()
-        }).to_string().into())?)
+        .body(
+            json!({
+                "prompts": {
+                    "system": parsed.prompts.system,
+                    "user": parsed.prompts.user
+                }
+            })
+            .to_string()
+            .into(),
+        )?)
 }
