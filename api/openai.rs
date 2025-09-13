@@ -158,7 +158,6 @@ pub async fn handler(req: Request) -> Result<Response<Body>, Error> {
                 .header("Content-Type", "application/json")
                 .body(
                     json!({
-                        "model": model,
                         "answer": assistant,
                     })
                     .to_string()
