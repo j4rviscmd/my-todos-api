@@ -13,6 +13,9 @@ serde = { version = "1", features = ["derive"] }
 url = "2"
 openai = "1"
 http = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+gemini-rs = "2.0.0"
+thiserror = "1"
 
 # You can specify a library for shared logic here (optional)
 # [lib]
@@ -35,3 +38,7 @@ path = "api/handler.rs"
 [[bin]]
 name = "openai"
 path = "api/openai.rs"
+
+[[bin]]
+name = "gemini"
+path = "api/gemini.rs"
